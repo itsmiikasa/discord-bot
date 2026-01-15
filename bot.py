@@ -1,72 +1,104 @@
-# -*- coding: utf-8 -*-
-import os
 import discord
 from discord.ext import commands
+from discord.ui import Button, View
+from flask import Flask
+from threading import Thread
+import os
 
-TOKEN = os.getenv("TOKEN")
+# ------------------ WEB SERVER PARA UPTIME ROBOT ------------------
+app = Flask("")
 
-GUILD_ID = 1460123308673601793
-CHANNEL_ID = 1460129647022051379
+@app.route("/")
+def home():
+    return "Bot activo"
+
+def run():
+    app.run(host="0.0.0.0", port=8080)
+
+Thread(target=run).start()
+# -------------------------------------------------------------------
 
 intents = discord.Intents.default()
-intents.guilds = True
 intents.members = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# ------------------ CONFIG ------------------
+ROLES_CHANNEL_ID = 123456789012345678    # Canal de roles
+
+# Roles de ping
 PING_ROLES = {
-    "live ping": "live ping",
-    "lol ping": "lol ping",
-    "valorant ping": "valorant ping",
-    "esports ping": "esports ping"
+    "live ping": 1460125747489538089,
+    "lol ping": 1460126037693431809,
+    "valorant ping": 1460126178303152292,
+    "esports ping": 1460126245152096418
 }
 
-class PingRoles(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+# Roles cosméticos
+GAME_ROLES = {
+    "league of legends": 1460290957663535320,
+    "valorant": 1460291045832003829,
+    "2xko": 1460291230108880976
+}
 
-    @discord.ui.button(label="live ping", style=discord.ButtonStyle.primary, custom_id="ping_live")
-    async def live(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.toggle_role(interaction, "live ping")
+# Archivo para guardar ID del mensaje de roles
+MESSAGE_ID_FILE = "roles_msg_id.txt"
 
-    @discord.ui.button(label="lol ping", style=discord.ButtonStyle.secondary, custom_id="ping_lol")
-    async def lol(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.toggle_role(interaction, "lol ping")
+# ------------------ FUNCIONES ------------------
 
-    @discord.ui.button(label="valorant ping", style=discord.ButtonStyle.secondary, custom_id="ping_valorant")
-    async def valorant(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.toggle_role(interaction, "valorant ping")
+async def send_roles_embed():
+    channel = bot.get_channel(ROLES_CHANNEL_ID)
+    if channel is None:
+        return
 
-    @discord.ui.button(label="esports ping", style=discord.ButtonStyle.secondary, custom_id="ping_esports")
-    async def esports(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.toggle_role(interaction, "esports ping")
+    # Revisar si ya existe el mensaje
+    message_id = None
+    if os.path.exists(MESSAGE_ID_FILE):
+        with open(MESSAGE_ID_FILE, "r") as f:
+            message_id = f.read().strip()
 
-    async def toggle_role(self, interaction, role_name):
-        role = discord.utils.get(interaction.guild.roles, name=role_name)
-        if not role:
-            await interaction.response.send_message("El rol no existe.", ephemeral=True)
-            return
+    if message_id:
+        try:
+            msg = await channel.fetch_message(int(message_id))
+            return  # Ya existe, no enviar
+        except:
+            pass  # Se borró, enviar de nuevo
 
-        if role in interaction.user.roles:
-            await interaction.user.remove_roles(role)
-            await interaction.response.send_message(f"Rol **{role_name}** removido.", ephemeral=True)
-        else:
-            await interaction.user.add_roles(role)
-            await interaction.response.send_message(f"Rol **{role_name}** agregado.", ephemeral=True)
+    # Crear embed
+    embed = discord.Embed(
+        title="Roles de Ping y Juegos",
+        description="Reacciona con los botones para asignarte roles 💜",
+        color=0x6A0DAD
+    )
+
+    # Crear botones
+    view = View(timeout=None)  # timeout=None hace que el view sea persistente
+    for role_name in list(PING_ROLES.keys()) + list(GAME_ROLES.keys()):
+        button = Button(label=role_name, style=discord.ButtonStyle.primary, custom_id=role_name)
+        async def button_callback(interaction, role_name=role_name):
+            role_id = PING_ROLES.get(role_name) or GAME_ROLES.get(role_name)
+            role = interaction.guild.get_role(role_id)
+            if role in interaction.user.roles:
+                await interaction.user.remove_roles(role)
+                await interaction.response.send_message(f"Se te quitó el rol {role_name}", ephemeral=True)
+            else:
+                await interaction.user.add_roles(role)
+                await interaction.response.send_message(f"Se te asignó el rol {role_name}", ephemeral=True)
+        button.callback = button_callback
+        view.add_item(button)
+
+    msg = await channel.send(embed=embed, view=view)
+
+    # Guardar ID para no duplicar
+    with open(MESSAGE_ID_FILE, "w") as f:
+        f.write(str(msg.id))
+
+# ------------------ EVENTOS ------------------
 
 @bot.event
 async def on_ready():
     print(f"Bot conectado como {bot.user}")
-    bot.add_view(PingRoles())
+    await send_roles_embed()
 
-    guild = bot.get_guild(GUILD_ID)
-    channel = guild.get_channel(CHANNEL_ID)
-
-    await channel.send(
-        "**Roles de notificaciones**\n"
-        "Usa los botones para activar o quitar los pings que quieras.\n"
-        "Puedes tener varios o ninguno, tú decides",
-        view=PingRoles()
-    )
-
+# ------------------ TOKEN ------------------
+TOKEN = os.getenv("TOKEN")
 bot.run(TOKEN)
